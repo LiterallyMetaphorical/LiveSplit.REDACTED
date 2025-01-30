@@ -2,15 +2,17 @@
 Scanning Best Practices:
 
 string500 map search for a string with UTF-16 ticked, "/Game/Maps/Game/BEV_OUTBREAK" (first area) full string should be something like /Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent
+end offsets should be 0x30, 0x30, 0x0. Region of memory should be 06
+
 IGT search for a 4Byte matching the in-game time, its really that easy lol
+One offset, 0x228 - region of memory is 06
 */
 
 state("Redacted-Win64-Shipping")
 {
-    string500 map: 0x06F72BB0, 0xB0, 0x30, 0x30, 0x0;
-    int IGT      : 0x06D33D18, 0x228;
+    string500 map: 0x06AFA108, 0x1A0, 0x30, 0x30, 0x0;
+    int IGT      : 0x06D31CB8, 0x228;
 }
-
 
 startup
   {
