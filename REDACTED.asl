@@ -1,14 +1,4 @@
-    /*
-    Scanning Best Practices:
-    string500 map search for a string with UTF-16 ticked, "/Game/Maps/Game/BEV_OUTBREAK" (first area) full string should be something like /Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent
-    IGT search for a 4Byte matching the in-game time, its really that easy lol
-    */
-
-    state("Redacted-Win64-Shipping")
-    {
-        string500 map: 0x6AFA108, 0x1A0, 0x30, 0x30, 0x0;
-        //int IGT      : 0x6D31CB8, 0x228;
-    }
+    state("Redacted-Win64-Shipping"){ }
 
     startup
     {
@@ -71,9 +61,10 @@
 
     init
     {
-    	IntPtr gWorld = vars.Helper.ScanRel(3, "48 8B 1D ???????? 48 85 DB 74 ?? 41 B0 01");
-		IntPtr gEngine = vars.Helper.ScanRel(3, "E8 ?? ?? ?? ?? 50 53 51");
-		IntPtr fNamePool = vars.Helper.ScanRel(3, "E8 ?? ?? ?? ?? 50 53 51");
+    	IntPtr gWorld = vars.Helper.ScanRel(3, "48 8B 05 ???????? 48 3B C? 48 0F 44 C? 48 89 05 ???????? E8");
+        IntPtr gEngine = vars.Helper.ScanRel(3, "48 89 05 ???????? 48 85 c9 74 ?? e8 ???????? 48 8d 4d");
+        IntPtr fNamePool = vars.Helper.ScanRel(3, "48 8d 05 ???????? eb ?? 48 8d 0d ???????? e8 ???????? c6 05");
+        IntPtr gSyncLoadCount = vars.Helper.ScanRel(5, "89 43 60 8B 05 ?? ?? ?? ??");
         IntPtr IGTPtr = vars.Helper.ScanRel(3, "48 8B ?? ?? ?? ?? ?? C3 ?? ?? ?? ?? ?? ?? ?? ?? 48 83 ?? ?? 48 8B ?? ?? ?? ?? ?? 48 85 ?? 74 ?? 48 8B ?? ?? ?? ?? ?? 48 85");
 		
 		if (gWorld == IntPtr.Zero || gEngine == IntPtr.Zero || fNamePool == IntPtr.Zero)
@@ -126,33 +117,17 @@
         ((Action)vars.RefreshFNames)();
 
         //incrementing the Room Counter by 1 each time we detect a room change
-        if(old.map != current.map)
+        if(old.World != current.World)
         {
             ++ vars.totalRoomCount; //incrementing the Room Counter by 1 each time we detect a room change
             
-            if(old.map.Contains("Exit_Persistent") && current.map.Contains("Start_Persistent")) 
+            if(old.World.Contains("Exit_Persistent") && current.World.Contains("Start_Persistent")) 
             { vars.biomeRoomCount = 1; } 
             else 
             { ++ vars.biomeRoomCount; }
         }
 
-        //null checks before prettifying
-        if(current.map == null)   {current.mapPretty = "Waiting For Mission...";}
-
-        var mapFullString  = current.map.ToString(); 
-        var mapFirstIndex  = mapFullString.IndexOf("/"); 
-        var mapSecondIndex = mapFullString.IndexOf("/", mapFirstIndex + 1);
-        var mapThirdIndex  = mapFullString.IndexOf("/", mapSecondIndex + 1);
-        var mapFourthIndex = mapFullString.IndexOf("/", mapThirdIndex + 1);
-        var mapFifthIndex  = mapFullString.IndexOf("/", mapFourthIndex + 1);
-
-        //If we successfully found the second "SP"...
-        if (mapSecondIndex != -1)
-            {
-                current.mapPretty = mapFullString.Substring(mapFifthIndex + 1);
-            }
-
-        vars.SetTextIfEnabled("Map",current.mapPretty);
+        vars.SetTextIfEnabled("Map",current.World);
         vars.SetTextIfEnabled("IGT",current.IGT);
         vars.SetTextIfEnabled("Total Room Counter",vars.totalRoomCount);
 		vars.SetTextIfEnabled("Total Biome Counter",vars.biomeRoomCount);
@@ -162,7 +137,7 @@
 
     start
     {
-        return old.map == "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent" && current.map == "/Game/Maps/Game/BEV_Outbreak/PRS_FirstRoom_Persistent";
+        return old.World != "PRS_FirstRoom_Persistent" && current.World == "PRS_FirstRoom_Persistent";
     }
 
     onStart
@@ -173,7 +148,7 @@
 
     split 
     { 	
-        if ((settings["Area Splits"] && old.map.Contains("Exit_Persistent") && current.map.Contains("Start_Persistent")) || (settings["Room Splits"] && old.map != current.map))
+        if ((settings["Area Splits"] && old.World.Contains("Exit_Persistent") && current.World.Contains("Start_Persistent")) || (settings["Room Splits"] && old.World != current.World))
         {
             return true;
         }
@@ -182,7 +157,7 @@
 
     reset
     {
-        return current.map == "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent" && old.map != "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent";
+        return current.World == "PRS_Start_Persistent" && old.World != "PRS_Start_Persistent";
     }
 
     onReset
