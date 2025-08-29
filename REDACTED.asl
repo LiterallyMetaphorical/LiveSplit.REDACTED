@@ -1,143 +1,202 @@
-/*
-Scanning Best Practices:
+    /*
+    Scanning Best Practices:
+    string500 map search for a string with UTF-16 ticked, "/Game/Maps/Game/BEV_OUTBREAK" (first area) full string should be something like /Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent
+    IGT search for a 4Byte matching the in-game time, its really that easy lol
+    */
 
-string500 map search for a string with UTF-16 ticked, "/Game/Maps/Game/BEV_OUTBREAK" (first area) full string should be something like /Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent
-end offsets should be 0x30, 0x30, 0x0. Region of memory should be 06
-
-IGT search for a 4Byte matching the in-game time, its really that easy lol
-One offset, 0x228 - region of memory is 06
-*/
-
-state("Redacted-Win64-Shipping")
-{
-    string500 map: 0x06AFA108, 0x1A0, 0x30, 0x30, 0x0;
-    int IGT      : 0x06D31CB8, 0x228;
-}
-
-startup
-  {
-    //Creating a room counter variable
-    vars.totalRoomCount = 0;
-    vars.biomeRoomCount = 0;
-
-	//Checks if the current time method is Real Time, if it is then it spawns a popup asking to switch to Game Time
-    if (timer.CurrentTimingMethod == TimingMethod.RealTime)
+    state("Redacted-Win64-Shipping")
     {
-        var timingMessage = MessageBox.Show (
-            "This game uses Time without Loads (Game Time) as the main timing method.\n"+
-            "LiveSplit is currently set to show Real Time (RTA).\n"+
-            "Would you like to set the timing method to Game Time?",
-            "LiveSplit | REDACTED",
-            MessageBoxButtons.YesNo,MessageBoxIcon.Question
-        );
+        string500 map: 0x6AFA108, 0x1A0, 0x30, 0x30, 0x0;
+        //int IGT      : 0x6D31CB8, 0x228;
+    }
 
-        if (timingMessage == DialogResult.Yes)
+    startup
+    {
+        Assembly.Load(File.ReadAllBytes("Components/asl-help")).CreateInstance("Basic");
+		vars.Helper.GameName = "REDACTED";
+		vars.Helper.AlertLoadless();
+
+		#region setting creation
+		//Autosplitter Settings Creation
+		dynamic[,] _settings =
+		{
+        {"Splits Options", 				true, "Splits Options [SELECT ONE ONLY]",				null},
+            {"Room Splits",             true, "Room Splits",                                "Splits Options"},
+            {"Area Splits",             true, "Area Splits",                                "Splits Options"},
+		{"GameInfo", 					true, "Print Various Game Info",						null},
+			{"Map",                     true, "Current Map",                                "GameInfo"},
+            {"IGT",                     false, "Current IGT",                                "GameInfo"},
+            {"Total Room Counter",      true, "Total Room Counter",                                "GameInfo"},
+            {"Total Biome Counter",      true, "Total Biome Counter",                                "GameInfo"},
+		};
+		vars.Helper.Settings.Create(_settings);
+		#endregion
+
+		#region TextComponent
+		vars.lcCache = new Dictionary<string, LiveSplit.UI.Components.ILayoutComponent>();
+		vars.SetText = (Action<string, object>)((text1, text2) =>
+		{
+			const string FileName = "LiveSplit.Text.dll";
+			LiveSplit.UI.Components.ILayoutComponent lc;
+
+			if (!vars.lcCache.TryGetValue(text1, out lc))
+			{
+				lc = timer.Layout.LayoutComponents.Reverse().Cast<dynamic>()
+					.FirstOrDefault(llc => llc.Path.EndsWith(FileName) && llc.Component.Settings.Text1 == text1)
+					?? LiveSplit.UI.Components.ComponentManager.LoadLayoutComponent(FileName, timer);
+
+				vars.lcCache.Add(text1, lc);
+			}
+
+			if (!timer.Layout.LayoutComponents.Contains(lc)) timer.Layout.LayoutComponents.Add(lc);
+			dynamic tc = lc.Component;
+			tc.Settings.Text1 = text1;
+			tc.Settings.Text2 = text2.ToString();
+		});
+		vars.RemoveText = (Action<string>)(text1 =>
+		{
+			LiveSplit.UI.Components.ILayoutComponent lc;
+			if (vars.lcCache.TryGetValue(text1, out lc))
+			{
+				timer.Layout.LayoutComponents.Remove(lc);
+				vars.lcCache.Remove(text1);
+			}
+		});
+		#endregion
+
+        //Creating a room counter variable
+        vars.totalRoomCount = 0;
+        vars.biomeRoomCount = 0;
+    }
+
+    init
+    {
+    	IntPtr gWorld = vars.Helper.ScanRel(3, "48 8B 1D ???????? 48 85 DB 74 ?? 41 B0 01");
+		IntPtr gEngine = vars.Helper.ScanRel(3, "E8 ?? ?? ?? ?? 50 53 51");
+		IntPtr fNamePool = vars.Helper.ScanRel(3, "E8 ?? ?? ?? ?? 50 53 51");
+        IntPtr IGTPtr = vars.Helper.ScanRel(3, "48 8B ?? ?? ?? ?? ?? C3 ?? ?? ?? ?? ?? ?? ?? ?? 48 83 ?? ?? 48 8B ?? ?? ?? ?? ?? 48 85 ?? 74 ?? 48 8B ?? ?? ?? ?? ?? 48 85");
+		
+		if (gWorld == IntPtr.Zero || gEngine == IntPtr.Zero || fNamePool == IntPtr.Zero)
+		{
+			const string Msg = "Not all required addresses could be found by scanning... yet";
+			throw new Exception(Msg);
+		}
+
+		// GWorld.FNameIndex
+		vars.Helper["IGT"] = vars.Helper.Make<int>(IGTPtr, 0x228);
+        // GWorld.FNameIndex
+		vars.Helper["GWorldName"] = vars.Helper.Make<ulong>(gWorld, 0x18);
+
+        //FName Reader (define before RefreshNames)
+	    vars.FNameToString = (Func<ulong, string>)(fName =>
+		{
+			var nameIdx = (fName & 0x000000000000FFFF) >> 0x00;
+			var chunkIdx = (fName & 0x00000000FFFF0000) >> 0x10;
+			var number = (fName & 0xFFFFFFFF00000000) >> 0x20;
+
+			IntPtr chunk = vars.Helper.Read<IntPtr>(fNamePool + 0x10 + (int)chunkIdx * 0x8);
+			IntPtr entry = chunk + (int)nameIdx * sizeof(short);
+
+			int length = vars.Helper.Read<short>(entry) >> 6;
+			string name = vars.Helper.ReadString(length, ReadStringType.UTF8, entry + sizeof(short));
+
+			return number == 0 ? name : name + "_" + number;
+		});
+    
+        vars.RefreshFNames = (Action)(() =>
         {
-            timer.CurrentTimingMethod = TimingMethod.GameTime;
-        }
+            current.World = vars.FNameToString(current.GWorldName);
+        });
+
+		vars.SetTextIfEnabled = (Action<string, object>)((text1, text2) =>
+		{
+			if (settings[text1]) vars.SetText(text1, text2); 
+			else vars.RemoveText(text1);
+		});
+
+        vars.Helper.Update();
+		vars.Helper.MapPointers();
+        ((Action)vars.RefreshFNames)();
     }
 
-    //creates text components for variable information
-	vars.SetTextComponent = (Action<string, string>)((id, text) =>
-	{
-	        var textSettings = timer.Layout.Components.Where(x => x.GetType().Name == "TextComponent").Select(x => x.GetType().GetProperty("Settings").GetValue(x, null));
-	        var textSetting = textSettings.FirstOrDefault(x => (x.GetType().GetProperty("Text1").GetValue(x, null) as string) == id);
-	        if (textSetting == null)
-	        {
-	        var textComponentAssembly = Assembly.LoadFrom("Components\\LiveSplit.Text.dll");
-	        var textComponent = Activator.CreateInstance(textComponentAssembly.GetType("LiveSplit.UI.Components.TextComponent"), timer);
-	        timer.Layout.LayoutComponents.Add(new LiveSplit.UI.Components.LayoutComponent("LiveSplit.Text.dll", textComponent as LiveSplit.UI.Components.IComponent));
-	
-	        textSetting = textComponent.GetType().GetProperty("Settings", BindingFlags.Instance | BindingFlags.Public).GetValue(textComponent, null);
-	        textSetting.GetType().GetProperty("Text1").SetValue(textSetting, id);
-	        }
-	
-	        if (textSetting != null)
-	        textSetting.GetType().GetProperty("Text2").SetValue(textSetting, text);
-    });
-
-    //Optional Room Splits
-    //Parent setting
-    settings.Add("Splits Options", true, "Splits Options [SELECT ONE ONLY]");
-    //Child Settings
-    settings.Add("Room Splits", false, "Room Splits", "Splits Options");
-    settings.Add("Area Splits", true, "Area Splits", "Splits Options");
-    //Creating actual text stuff
-    //Parent setting
-	settings.Add("Variable Information", true, "Variable Information");
-	//Child settings that will sit beneath Parent setting
-    settings.Add("Total Room Counter", true, "Total Room Counter", "Variable Information");
-    settings.Add("Biome Room Counter", true, "Biome Room Counter", "Variable Information");
-    settings.Add("Current Map", true, "Current Map", "Variable Information");
-    
-
-    
-}
-
-update
-{
-    //cutting the first 16 characters off the string value for a prettier name to work with
-    current.mapPretty = current.map.ToString().Substring(16);
-
-    //incrementing the Room Counter by 1 each time we detect a room change
-    if(old.map != current.map){
-        ++ vars.totalRoomCount;
-        //incrementing the Room Counter by 1 each time we detect a room change
-        if(old.map.Contains("Exit_Persistent") && current.map.Contains("Start_Persistent")) {
-            vars.biomeRoomCount = 1;
-        } else {
-            ++ vars.biomeRoomCount;
-        }
-    }
-    
-    //Prints room count
-    if(settings["Total Room Counter"]){vars.SetTextComponent("Total Room Count: ",vars.totalRoomCount.ToString());}
-
-    //Prints room count
-    if(settings["Biome Room Counter"]){vars.SetTextComponent("Biome Room Count: ",vars.biomeRoomCount.ToString());}
-
-    //Prints Current Map
-    if(settings["Current Map"]){vars.SetTextComponent("",current.mapPretty);}
-    
-}
-
-onStart
-{
-    vars.totalRoomCount = 1;
-    vars.biomeRoomCount = 1;
-}
-
-start
-{
-    return old.map == "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent" && current.map == "/Game/Maps/Game/BEV_Outbreak/PRS_FirstRoom_Persistent";
-}
-
-split 
-{ 	
-    if ((settings["Area Splits"] && old.map.Contains("Exit_Persistent") && current.map.Contains("Start_Persistent")) || (settings["Room Splits"] && old.map != current.map))
+    update
     {
-        return true;
+        vars.Helper.Update();
+		vars.Helper.MapPointers();
+        ((Action)vars.RefreshFNames)();
+
+        //incrementing the Room Counter by 1 each time we detect a room change
+        if(old.map != current.map)
+        {
+            ++ vars.totalRoomCount; //incrementing the Room Counter by 1 each time we detect a room change
+            
+            if(old.map.Contains("Exit_Persistent") && current.map.Contains("Start_Persistent")) 
+            { vars.biomeRoomCount = 1; } 
+            else 
+            { ++ vars.biomeRoomCount; }
+        }
+
+        //null checks before prettifying
+        if(current.map == null)   {current.mapPretty = "Waiting For Mission...";}
+
+        var mapFullString  = current.map.ToString(); 
+        var mapFirstIndex  = mapFullString.IndexOf("/"); 
+        var mapSecondIndex = mapFullString.IndexOf("/", mapFirstIndex + 1);
+        var mapThirdIndex  = mapFullString.IndexOf("/", mapSecondIndex + 1);
+        var mapFourthIndex = mapFullString.IndexOf("/", mapThirdIndex + 1);
+        var mapFifthIndex  = mapFullString.IndexOf("/", mapFourthIndex + 1);
+
+        //If we successfully found the second "SP"...
+        if (mapSecondIndex != -1)
+            {
+                current.mapPretty = mapFullString.Substring(mapFifthIndex + 1);
+            }
+
+        vars.SetTextIfEnabled("Map",current.mapPretty);
+        vars.SetTextIfEnabled("IGT",current.IGT);
+        vars.SetTextIfEnabled("Total Room Counter",vars.totalRoomCount);
+		vars.SetTextIfEnabled("Total Biome Counter",vars.biomeRoomCount);
+
+        //vars.Log(current.IGT);
     }
-    return false;
-}
 
-reset
-{
-    return current.map == "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent" && old.map != "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent";
-}
+    start
+    {
+        return old.map == "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent" && current.map == "/Game/Maps/Game/BEV_Outbreak/PRS_FirstRoom_Persistent";
+    }
 
-onReset
-{
-    vars.totalRoomCount = 0;
-    vars.biomeRoomCount = 0;
-}
+    onStart
+    {
+        vars.totalRoomCount = 1;
+        vars.biomeRoomCount = 1;
+    }
 
-gameTime 
-{
-    return TimeSpan.FromSeconds(current.IGT);
-}
+    split 
+    { 	
+        if ((settings["Area Splits"] && old.map.Contains("Exit_Persistent") && current.map.Contains("Start_Persistent")) || (settings["Room Splits"] && old.map != current.map))
+        {
+            return true;
+        }
+        return false;
+    }
 
-//Game/Maps/Game/BEV_Outbreak
-//Game/Maps/Game/BEV_Hydro
-//Game/Maps/Game/BEV_Snowcat
-//Game/Maps/Game/BEV_Hangar
+    reset
+    {
+        return current.map == "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent" && old.map != "/Game/Maps/Game/BEV_Outbreak/PRS_Start_Persistent";
+    }
+
+    onReset
+    {
+        vars.totalRoomCount = 0;
+        vars.biomeRoomCount = 0;
+    }
+
+    gameTime 
+    {
+        return TimeSpan.FromSeconds(current.IGT);
+    }
+
+    //Game/Maps/Game/BEV_Outbreak
+    //Game/Maps/Game/BEV_Hydro
+    //Game/Maps/Game/BEV_Snowcat
+    //Game/Maps/Game/BEV_Hangar
